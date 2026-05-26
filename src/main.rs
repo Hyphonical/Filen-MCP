@@ -10,6 +10,7 @@ mod serve;
 mod tools;
 
 use clap::{Parser, Subcommand};
+use tracing_subscriber::filter::LevelFilter;
 
 #[derive(Parser)]
 #[command(name = "filen-mcp", about = "MCP server for Filen cloud storage")]
@@ -31,17 +32,23 @@ enum Command {
 // ---------------------------------------------------------------------------
 
 fn main() -> anyhow::Result<()> {
-	tracing_subscriber::fmt::init();
+	tracing_subscriber::fmt()
+		.with_max_level(LevelFilter::WARN)
+		.with_ansi(false)
+		.with_writer(std::io::stderr)
+		.init();
 
 	let cli = Cli::parse();
 
-	let runtime = tokio::runtime::Builder::new_multi_thread()
+	let runtime = tokio::runtime::Builder::new_current_thread()
 		.enable_all()
 		.build()?;
 
+	let local = tokio::task::LocalSet::new();
+
 	match cli.command {
 		Command::Login => runtime.block_on(login::run())?,
-		Command::Serve => runtime.block_on(serve::run())?,
+		Command::Serve => runtime.block_on(local.run_until(serve::run()))?,
 	}
 
 	Ok(())

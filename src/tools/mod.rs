@@ -24,6 +24,7 @@ use rmcp::ErrorData;
 use rmcp::Json;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::tool;
+use rmcp::tool_handler;
 use rmcp::tool_router;
 use serde::{Deserialize, Serialize};
 use tokio_util::compat::FuturesAsyncReadCompatExt;
@@ -241,11 +242,38 @@ struct TrashEntry {
 	size: u64,
 }
 
+// Wrapper types — MCP spec requires tool outputSchema root type to be "object",
+// so array results must be wrapped in an object field.
+#[derive(Serialize, schemars::JsonSchema)]
+struct LsOutput {
+	entries: Vec<DirEntry>,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+struct SearchOutput {
+	matches: Vec<SearchEntry>,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+struct NotesListOutput {
+	notes: Vec<NoteEntry>,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+struct TrashListOutput {
+	items: Vec<TrashEntry>,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+struct StubOutput {
+	message: String,
+}
+
 // ---------------------------------------------------------------------------
 // Tool Implementations
 // ---------------------------------------------------------------------------
 
-#[tool_router(server_handler)]
+#[tool_router]
 impl FilenMcpServer {
 	// ── filen_ls ──────────────────────────────────────────────────────
 
@@ -256,7 +284,7 @@ impl FilenMcpServer {
 	async fn filen_ls(
 		&self,
 		Parameters(LsParams { path }): Parameters<LsParams>,
-	) -> Result<Json<Vec<DirEntry>>, ErrorData> {
+	) -> Result<Json<LsOutput>, ErrorData> {
 		let guard = self.client().await?;
 		let client = guard.as_ref().unwrap();
 
@@ -310,7 +338,7 @@ impl FilenMcpServer {
 			});
 		}
 
-		Ok(Json(entries))
+		Ok(Json(LsOutput { entries }))
 	}
 
 	// ── filen_mkdir ───────────────────────────────────────────────────
@@ -643,7 +671,7 @@ impl FilenMcpServer {
 	async fn filen_search(
 		&self,
 		Parameters(SearchParams { query }): Parameters<SearchParams>,
-	) -> Result<Json<Vec<SearchEntry>>, ErrorData> {
+	) -> Result<Json<SearchOutput>, ErrorData> {
 		let guard = self.client().await?;
 		let client = guard.as_ref().unwrap();
 
@@ -679,7 +707,7 @@ impl FilenMcpServer {
 			})
 			.collect();
 
-		Ok(Json(results))
+		Ok(Json(SearchOutput { matches: results }))
 	}
 
 	// ── filen_whoami ──────────────────────────────────────────────────
@@ -698,7 +726,7 @@ impl FilenMcpServer {
 	// ── filen_notes_list ──────────────────────────────────────────────
 
 	#[tool(name = "filen_notes_list", description = "List all notes")]
-	async fn filen_notes_list(&self) -> Result<Json<Vec<NoteEntry>>, ErrorData> {
+	async fn filen_notes_list(&self) -> Result<Json<NotesListOutput>, ErrorData> {
 		let guard = self.client().await?;
 		let client = guard.as_ref().unwrap();
 
@@ -719,7 +747,7 @@ impl FilenMcpServer {
 			})
 			.collect();
 
-		Ok(Json(results))
+		Ok(Json(NotesListOutput { notes: results }))
 	}
 
 	// ── filen_note_get ────────────────────────────────────────────────
@@ -885,7 +913,7 @@ impl FilenMcpServer {
 	// ── filen_shares_in ───────────────────────────────────────────────
 
 	#[tool(name = "filen_shares_in", description = "List items shared with you")]
-	async fn filen_shares_in(&self) -> Result<Json<serde_json::Value>, ErrorData> {
+	async fn filen_shares_in(&self) -> Result<Json<StubOutput>, ErrorData> {
 		Err(ErrorData::internal_error(
 			"Share listing is not yet implemented. The SDK does not currently expose a public API for listing inbound shares.",
 			None,
@@ -895,7 +923,7 @@ impl FilenMcpServer {
 	// ── filen_shares_out ──────────────────────────────────────────────
 
 	#[tool(name = "filen_shares_out", description = "List items you have shared")]
-	async fn filen_shares_out(&self) -> Result<Json<serde_json::Value>, ErrorData> {
+	async fn filen_shares_out(&self) -> Result<Json<StubOutput>, ErrorData> {
 		Err(ErrorData::internal_error(
 			"Share listing is not yet implemented. The SDK does not currently expose a public API for listing outbound shares.",
 			None,
@@ -908,7 +936,7 @@ impl FilenMcpServer {
 		name = "filen_ls_trash",
 		description = "List items in your Filen trash"
 	)]
-	async fn filen_ls_trash(&self) -> Result<Json<Vec<TrashEntry>>, ErrorData> {
+	async fn filen_ls_trash(&self) -> Result<Json<TrashListOutput>, ErrorData> {
 		let guard = self.client().await?;
 		let client = guard.as_ref().unwrap();
 
@@ -935,9 +963,12 @@ impl FilenMcpServer {
 			});
 		}
 
-		Ok(Json(results))
+		Ok(Json(TrashListOutput { items: results }))
 	}
 }
+
+#[tool_handler]
+impl rmcp::ServerHandler for FilenMcpServer {}
 
 // ---------------------------------------------------------------------------
 // Helpers

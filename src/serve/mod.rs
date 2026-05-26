@@ -41,10 +41,15 @@ pub async fn run() -> anyhow::Result<()> {
 	eprintln!("Connected as {}", state.email);
 
 	let server = FilenMcpServer::new(state);
-	server
+	let running = server
 		.serve(rmcp::transport::stdio())
 		.await
 		.context("MCP server encountered an irrecoverable error")?;
+
+	running
+		.waiting()
+		.await
+		.map_err(|e| anyhow::anyhow!("Server event loop error: {}", e))?;
 
 	Ok(())
 }
