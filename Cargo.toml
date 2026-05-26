@@ -1,0 +1,47 @@
+[package]
+name = "filen-mcp"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89.0"
+description = "MCP server for Filen cloud storage"
+license = "MIT"
+
+[[bin]]
+name = "filen-mcp"
+path = "src/main.rs"
+
+[dependencies]
+
+# ── MCP Protocol ────────────────────────────────────────────────
+rmcp = { version = "1.7.0", features = ["server", "transport-io", "local"] }
+
+# ── Filen Cloud Storage SDK ─────────────────────────────────────
+filen-sdk-rs = { git = "https://github.com/FilenCloudDienste/filen-rs", rev = "285ade02102236c0eb2dc8a33a3920c3872c9bed" }
+filen-types = { git = "https://github.com/FilenCloudDienste/filen-rs", rev = "285ade02102236c0eb2dc8a33a3920c3872c9bed" }
+
+# ── Async Runtime ───────────────────────────────────────────────
+tokio = { version = "1.47.1", features = ["rt-multi-thread", "macros", "fs", "io-util"] }
+tokio-util = { version = "0.7", features = ["compat"] }
+futures = "0.3"
+futures-util = { version = "0.3", default-features = false, features = ["io", "std"] }
+
+# ── Serialization ───────────────────────────────────────────────
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.142"
+schemars = { version = "1.2.1", features = ["chrono04"] }
+
+# ── CLI & UX ────────────────────────────────────────────────────
+clap = { version = "4.5.48", features = ["derive"] }
+rpassword = "7.4.0"
+anyhow = "1.0.98"
+chrono = "0.4.41"
+uuid = "1.0"
+tracing = "0.1.41"
+tracing-subscriber = "0.3.20"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = true
+panic = "abort"
+opt-level = 3

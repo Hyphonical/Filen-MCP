@@ -1,0 +1,6 @@
+/target/
+**/*.rs.bk
+.env
+auth.json
+*.pdb
+PLAN.md
