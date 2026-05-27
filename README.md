@@ -17,7 +17,7 @@ to LLM clients (Claude Desktop, Cursor, etc.) over the Model Context Protocol.
 # Clone and build
 git clone https://github.com/your-org/filen-mcp
 cd filen-mcp
-cargo build --release
+just dev
 
 # Authenticate (interactive — email, password, optional 2FA)
 cargo run -- login
@@ -41,19 +41,24 @@ via `FILEN_AUTH_CONFIG_JSON` for container/CI usage.
 | `filen_mkdir` | Create a directory |
 | `filen_upload` | Upload a local file |
 | `filen_download` | Download a remote file |
-| `filen_delete` | Move a file/directory to trash |
+| `filen_delete` | Delete a file/directory |
 | `filen_mv` | Move a file/directory |
 | `filen_stat` | Get file/directory metadata |
 | `filen_search` | Search by name |
+| `filen_quota` | Get current storage quota info |
 | `filen_whoami` | Get authenticated user info |
 | `filen_notes_list` | List all notes |
 | `filen_note_get` | Get a note by UUID |
 | `filen_note_create` | Create a note |
 | `filen_note_update` | Update a note |
 | `filen_note_delete` | Delete a note |
+| `filen_note_archive` | Archive a note |
+| `filen_note_trash` | Trash a note |
+| `filen_note_restore` | Restore a note from trash/archive |
 | `filen_shares_in` | List items shared with you |
 | `filen_shares_out` | List items you shared |
 | `filen_ls_trash` | List trash contents |
+| `filen_empty_trash` | Empty the Filen trash |
 
 ## MCP Client Configuration
 

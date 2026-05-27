@@ -24,7 +24,7 @@ pub struct SharedState {
 	pub client: Arc<Mutex<Option<Client>>>,
 	pub unauth: Arc<UnauthClient>,
 	pub email: String,
-	pub user_id: u64,
+	pub user_id: i64,
 }
 
 // ---------------------------------------------------------------------------
@@ -36,9 +36,9 @@ pub async fn run() -> anyhow::Result<()> {
 	let state = build_state(&config_json)
 		.context("Failed to construct Filen client from config. Run 'filen-mcp login' first.")?;
 
-	eprintln!("Loaded auth config");
-	eprintln!("Filen-MCP server started (stdio)");
-	eprintln!("Connected as {}", state.email);
+	tracing::info!("Loaded auth config");
+	tracing::info!("Filen-MCP server started (stdio)");
+	tracing::info!("Connected as {}", state.email);
 
 	let server = FilenMcpServer::new(state);
 	let running = server
@@ -78,7 +78,7 @@ fn read_auth_config() -> anyhow::Result<String> {
 fn build_state(config_json: &str) -> anyhow::Result<SharedState> {
 	let stringified: StringifiedClient = serde_json::from_str(config_json)?;
 	let email = stringified.email.clone();
-	let user_id = stringified.user_id;
+	let user_id = stringified.user_id as i64;
 	let unauth = UnauthClient::from_config(ClientConfig::default())?;
 	let client = unauth.from_stringified(stringified)?;
 	Ok(SharedState {

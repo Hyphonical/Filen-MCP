@@ -64,7 +64,8 @@ impl FilenMcpServer {
 
 #[derive(Deserialize, schemars::JsonSchema)]
 struct LsParams {
-	path: String,
+	/// Remote path to list. Use "/" or omit to list the root directory.
+	path: Option<String>,
 }
 
 #[derive(Serialize, schemars::JsonSchema)]
@@ -73,7 +74,7 @@ struct DirEntry {
 	uuid: String,
 	#[serde(rename = "type")]
 	entry_type: String,
-	size: u64,
+	size: i64,
 	mime: String,
 	created: String,
 	modified: String,
@@ -82,6 +83,7 @@ struct DirEntry {
 
 #[derive(Deserialize, schemars::JsonSchema)]
 struct MkdirParams {
+	/// Full remote path of the directory to create (e.g. "/myfolder" or "parent/newdir").
 	path: String,
 }
 
@@ -102,7 +104,7 @@ struct UploadParams {
 struct UploadOutput {
 	uuid: String,
 	name: String,
-	size: u64,
+	size: i64,
 	remote_path: String,
 }
 
@@ -114,12 +116,13 @@ struct DownloadParams {
 
 #[derive(Serialize, schemars::JsonSchema)]
 struct DownloadOutput {
-	size: u64,
+	size: i64,
 	local_path: String,
 }
 
 #[derive(Deserialize, schemars::JsonSchema)]
 struct DeleteParams {
+	/// Remote path to delete.
 	path: String,
 }
 
@@ -143,7 +146,8 @@ struct MvOutput {
 
 #[derive(Deserialize, schemars::JsonSchema)]
 struct StatParams {
-	path: String,
+	/// Remote path to inspect. Use "/" or omit to stat the root directory.
+	path: Option<String>,
 }
 
 #[derive(Serialize, schemars::JsonSchema)]
@@ -152,13 +156,13 @@ struct StatOutput {
 	uuid: String,
 	#[serde(rename = "type")]
 	entry_type: String,
-	size: u64,
+	size: i64,
 	mime: String,
 	created: String,
 	modified: String,
 	parent: String,
 	region: String,
-	chunks: u64,
+	chunks: i64,
 	favorited: bool,
 }
 
@@ -174,13 +178,19 @@ struct SearchEntry {
 	entry_type: String,
 	uuid: String,
 	path: String,
-	size: u64,
+	size: i64,
+}
+
+#[derive(Serialize, schemars::JsonSchema)]
+struct QuotaOutput {
+	storage_used: i64,
+	max_storage: i64,
 }
 
 #[derive(Serialize, schemars::JsonSchema)]
 struct WhoamiOutput {
 	email: String,
-	user_id: u64,
+	user_id: i64,
 }
 
 #[derive(Serialize, schemars::JsonSchema)]
@@ -239,7 +249,7 @@ struct TrashEntry {
 	uuid: String,
 	#[serde(rename = "type")]
 	entry_type: String,
-	size: u64,
+	size: i64,
 }
 
 // Wrapper types — MCP spec requires tool outputSchema root type to be "object",
@@ -288,19 +298,7 @@ impl FilenMcpServer {
 		let guard = self.client().await?;
 		let client = guard.as_ref().unwrap();
 
-		let item = resolve_path(client, &path).await?;
-
-		let dir = match item {
-			NonRootFileType::Dir(d) => d.into_owned(),
-			_ => {
-				return Err(ErrorData::internal_error(
-					format!("Path is not a directory: {path}"),
-					None,
-				));
-			}
-		};
-
-		let dir_type = DirType::Dir(Cow::Borrowed(&dir));
+		let dir_type = resolve_dir_path(client, path.as_deref()).await?;
 
 		let (dirs, files) = client
 			.list_dir::<_, filen_sdk_rs::fs::categories::Normal>(
@@ -330,7 +328,7 @@ impl FilenMcpServer {
 				name: f.name().unwrap_or("?").to_string(),
 				uuid: f.uuid().to_string(),
 				entry_type: "file".to_string(),
-				size: f.size(),
+				size: f.size() as i64,
 				mime: f.mime().unwrap_or("").to_string(),
 				created: format_opt_dt(f.created()),
 				modified: format_opt_dt(f.last_modified()),
@@ -354,22 +352,10 @@ impl FilenMcpServer {
 		let guard = self.client().await?;
 		let client = guard.as_ref().unwrap();
 
-		let (parent_path, name) = split_path(&path)
+		let (parent_path, name) = split_path_for_mkdir(&path)
 			.ok_or_else(|| ErrorData::internal_error(format!("Invalid path: {path}"), None))?;
 
-		let item = resolve_path(client, parent_path).await?;
-
-		let parent = match item {
-			NonRootFileType::Dir(d) => d.into_owned(),
-			_ => {
-				return Err(ErrorData::internal_error(
-					format!("Parent is not a directory: {parent_path}"),
-					None,
-				));
-			}
-		};
-
-		let parent_type = DirType::Dir(Cow::Borrowed(&parent));
+		let parent_type = resolve_dir_path(client, parent_path).await?;
 
 		let dir = client.create_dir(&parent_type, name).await.map_err(|e| {
 			ErrorData::internal_error(format!("Failed to create directory: {e}"), None)
@@ -403,20 +389,15 @@ impl FilenMcpServer {
 			.and_then(|n| n.to_str())
 			.ok_or_else(|| ErrorData::internal_error("Invalid local path", None))?;
 
-		let item = resolve_path(client, &remote_parent).await?;
+		let parent_type = resolve_dir_path(client, Some(&remote_parent)).await?;
 
-		let dir = match item {
-			NonRootFileType::Dir(d) => d.into_owned(),
-			_ => {
-				return Err(ErrorData::internal_error(
-					format!("Remote path is not a directory: {remote_parent}"),
-					None,
-				));
-			}
+		let parent_uuid = match &parent_type {
+			DirType::Dir(d) => *d.uuid(),
+			DirType::Root(r) => *r.uuid(),
 		};
 
 		let builder = client
-			.make_file_builder(file_name, *dir.uuid())
+			.make_file_builder(file_name, parent_uuid)
 			.map_err(|e| ErrorData::internal_error(format!("Failed to build file: {e}"), None))?;
 
 		let mut writer = client.get_file_writer(builder);
@@ -439,11 +420,17 @@ impl FilenMcpServer {
 			.into_remote_file()
 			.ok_or_else(|| ErrorData::internal_error("Upload did not return a file", None))?;
 
+		let remote_path = if remote_parent == "/" || remote_parent.is_empty() {
+			format!("/{file_name}")
+		} else {
+			format!("/{}/{file_name}", remote_parent.trim_matches('/'))
+		};
+
 		Ok(Json(UploadOutput {
 			uuid: remote_file.uuid().to_string(),
 			name: remote_file.name().unwrap_or("unknown").to_string(),
-			size: remote_file.size(),
-			remote_path: format!("/{}/{}", remote_parent.trim_matches('/'), file_name),
+			size: remote_file.size() as i64,
+			remote_path,
 		}))
 	}
 
@@ -463,7 +450,9 @@ impl FilenMcpServer {
 		let guard = self.client().await?;
 		let client = guard.as_ref().unwrap();
 
-		let item = resolve_path(client, &remote_path).await?;
+		let normalized = normalize_path(&remote_path)
+			.ok_or_else(|| ErrorData::internal_error(format!("Path is not a file: {remote_path}"), None))?;
+		let item = resolve_path(client, &normalized).await?;
 
 		let file = match item {
 			NonRootFileType::File(f) => f.into_owned(),
@@ -487,7 +476,7 @@ impl FilenMcpServer {
 			.map_err(|e| ErrorData::internal_error(format!("Download failed: {e}"), None))?;
 
 		Ok(Json(DownloadOutput {
-			size: bytes,
+			size: bytes as i64,
 			local_path: local_dest,
 		}))
 	}
@@ -505,7 +494,9 @@ impl FilenMcpServer {
 		let guard = self.client().await?;
 		let client = guard.as_ref().unwrap();
 
-		let item = resolve_path(client, &path).await?;
+		let normalized = normalize_path(&path)
+			.ok_or_else(|| ErrorData::internal_error(format!("Invalid path: {path}"), None))?;
+		let item = resolve_path(client, &normalized).await?;
 
 		match item {
 			NonRootFileType::Dir(mut d) => {
@@ -545,20 +536,13 @@ impl FilenMcpServer {
 		let guard = self.client().await?;
 		let client = guard.as_ref().unwrap();
 
-		let src_item = resolve_path(client, &from).await?;
-		let dest_item = resolve_path(client, &to).await?;
+		let src_normalized = normalize_path(&from)
+			.ok_or_else(|| ErrorData::internal_error(format!("Invalid source path: {from}"), None))?;
+		let dest_normalized = normalize_path(&to)
+			.ok_or_else(|| ErrorData::internal_error(format!("Invalid dest path: {to}"), None))?;
 
-		let dest_dir = match dest_item {
-			NonRootFileType::Dir(d) => d.into_owned(),
-			_ => {
-				return Err(ErrorData::internal_error(
-					format!("Destination is not a directory: {to}"),
-					None,
-				));
-			}
-		};
-
-		let dest_type = DirType::Dir(Cow::Borrowed(&dest_dir));
+		let src_item = resolve_path(client, &src_normalized).await?;
+		let dest_type = resolve_dir_path(client, Some(&dest_normalized)).await?;
 
 		match src_item {
 			NonRootFileType::File(mut f) => {
@@ -598,7 +582,28 @@ impl FilenMcpServer {
 		let guard = self.client().await?;
 		let client = guard.as_ref().unwrap();
 
-		let item = resolve_path(client, &path).await?;
+		// Root directory stat — special case
+		if is_root_path(path.as_deref()) {
+			let root = client.root();
+			return Ok(Json(StatOutput {
+				name: "/".to_string(),
+				uuid: root.uuid().to_string(),
+				entry_type: "directory".to_string(),
+				size: 0,
+				mime: String::new(),
+				created: String::new(),
+				modified: String::new(),
+				favorited: false,
+				parent: String::new(),
+				region: String::new(),
+				chunks: 0,
+			}));
+		}
+
+		let path_str = path.unwrap_or_default();
+		let normalized = normalize_path(&path_str)
+			.ok_or_else(|| ErrorData::internal_error(format!("Invalid path: {path_str}"), None))?;
+		let item = resolve_path(client, &normalized).await?;
 
 		let (
 			name,
@@ -617,31 +622,31 @@ impl FilenMcpServer {
 				d.name().unwrap_or("?").to_string(),
 				d.uuid().to_string(),
 				"directory",
-				0u64,
+				0,
 				String::new(),
 				format_opt_dt(Some(d.timestamp())),
 				String::new(),
 				d.favorited(),
 				String::new(),
 				String::new(),
-				0u64,
+				0,
 			),
 			NonRootFileType::File(ref f) => (
 				f.name().unwrap_or("?").to_string(),
 				f.uuid().to_string(),
 				"file",
-				f.size(),
+				f.size() as i64,
 				f.mime().unwrap_or("").to_string(),
 				format_opt_dt(f.created()),
 				format_opt_dt(f.last_modified()),
 				f.favorited(),
 				f.parent().to_string(),
 				f.region().to_string(),
-				f.chunks(),
+				f.chunks() as i64,
 			),
 			_ => {
 				return Err(ErrorData::internal_error(
-					format!("Stat not supported for root items: {path}"),
+					format!("Stat not supported for this path: {path_str}"),
 					None,
 				));
 			}
@@ -688,13 +693,13 @@ impl FilenMcpServer {
 						d.name().unwrap_or("?").to_string(),
 						"directory",
 						d.uuid().to_string(),
-						0u64,
+						0,
 					),
 					NonRootItemType::File(f) => (
 						f.name().unwrap_or("?").to_string(),
 						"file",
 						f.uuid().to_string(),
-						f.size(),
+						f.size() as i64,
 					),
 				};
 				SearchEntry {
@@ -959,11 +964,123 @@ impl FilenMcpServer {
 				name: f.name().unwrap_or("?").to_string(),
 				uuid: f.uuid().to_string(),
 				entry_type: "file".to_string(),
-				size: f.size(),
+				size: f.size() as i64,
 			});
 		}
 
 		Ok(Json(TrashListOutput { items: results }))
+	}
+
+	// ── filen_quota ───────────────────────────────────────────────────
+
+	#[tool(name = "filen_quota", description = "Get current storage quota info")]
+	async fn filen_quota(&self) -> Result<Json<QuotaOutput>, ErrorData> {
+		let guard = self.client().await?;
+		let client = guard.as_ref().unwrap();
+
+		// filen_sdk_rs Client exposes get_user_info directly
+		let info = client.get_user_info().await.map_err(|e| {
+			ErrorData::internal_error(format!("Failed to fetch user info: {e}"), None)
+		})?;
+
+		Ok(Json(QuotaOutput {
+			storage_used: info.storage_used as i64,
+			max_storage: info.max_storage as i64,
+		}))
+	}
+
+	// ── filen_empty_trash ─────────────────────────────────────────────
+
+	#[tool(name = "filen_empty_trash", description = "Empty the Filen trash")]
+	async fn filen_empty_trash(&self) -> Result<Json<StubOutput>, ErrorData> {
+		let guard = self.client().await?;
+		let client = guard.as_ref().unwrap();
+
+		client
+			.empty_trash()
+			.await
+			.map_err(|e| ErrorData::internal_error(format!("Failed to empty trash: {e}"), None))?;
+
+		Ok(Json(StubOutput {
+			message: "Trash emptied successfully".into(),
+		}))
+	}
+
+	// ── new note tools (archive, etc) ──────────────────────────────────
+
+	#[tool(name = "filen_note_archive", description = "Archive a note")]
+	async fn filen_note_archive(
+		&self,
+		Parameters(NoteGetParams { uuid }): Parameters<NoteGetParams>,
+	) -> Result<Json<NoteCreateOutput>, ErrorData> {
+		let guard = self.client().await?;
+		let client = guard.as_ref().unwrap();
+		let note_uuid = uuid::Uuid::parse_str(&uuid)
+			.map_err(|_| ErrorData::internal_error("Invalid UUID", None))?;
+		let mut note = client
+			.get_note(UuidStr::from(&note_uuid))
+			.await
+			.map_err(|_| ErrorData::internal_error("API Error", None))?
+			.ok_or_else(|| ErrorData::internal_error("Not Found", None))?;
+		client
+			.archive_note(&mut note)
+			.await
+			.map_err(|_| ErrorData::internal_error("Archive failed", None))?;
+		Ok(Json(NoteCreateOutput {
+			uuid: note.uuid().to_string(),
+			title: note.title().unwrap_or("?").to_string(),
+		}))
+	}
+
+	#[tool(name = "filen_note_trash", description = "Trash a note")]
+	async fn filen_note_trash(
+		&self,
+		Parameters(NoteGetParams { uuid }): Parameters<NoteGetParams>,
+	) -> Result<Json<NoteCreateOutput>, ErrorData> {
+		let guard = self.client().await?;
+		let client = guard.as_ref().unwrap();
+		let note_uuid = uuid::Uuid::parse_str(&uuid)
+			.map_err(|_| ErrorData::internal_error("Invalid UUID", None))?;
+		let mut note = client
+			.get_note(UuidStr::from(&note_uuid))
+			.await
+			.map_err(|_| ErrorData::internal_error("API Error", None))?
+			.ok_or_else(|| ErrorData::internal_error("Not Found", None))?;
+		client
+			.trash_note(&mut note)
+			.await
+			.map_err(|_| ErrorData::internal_error("Trash failed", None))?;
+		Ok(Json(NoteCreateOutput {
+			uuid: note.uuid().to_string(),
+			title: note.title().unwrap_or("?").to_string(),
+		}))
+	}
+
+	#[tool(
+		name = "filen_note_restore",
+		description = "Restore a note from trash/archive"
+	)]
+	async fn filen_note_restore(
+		&self,
+		Parameters(NoteGetParams { uuid }): Parameters<NoteGetParams>,
+	) -> Result<Json<NoteCreateOutput>, ErrorData> {
+		let guard = self.client().await?;
+		let client = guard.as_ref().unwrap();
+		let note_uuid = uuid::Uuid::parse_str(&uuid)
+			.map_err(|_| ErrorData::internal_error("Invalid UUID", None))?;
+		let mut note = client
+			.get_note(UuidStr::from(&note_uuid))
+			.await
+			.map_err(|_| ErrorData::internal_error("API Error", None))?
+			.ok_or_else(|| ErrorData::internal_error("Not Found", None))?;
+		client
+			.restore_note(&mut note)
+			.await
+			.map_err(|_| ErrorData::internal_error("Restore failed", None))?;
+		Ok(Json(NoteCreateOutput {
+			uuid: note.uuid().to_string(),
+			title: note.title().unwrap_or("?").to_string(),
+		}))
 	}
 }
 
@@ -974,10 +1091,42 @@ impl rmcp::ServerHandler for FilenMcpServer {}
 // Helpers
 // ---------------------------------------------------------------------------
 
+/// Normalize a remote path string.
+///
+/// - Strips leading and trailing `/`.
+/// - Collapses `.` segments (skipped) and double slashes.
+/// - Returns `Some(normalized)` for a non-empty path, `None` if the path is
+///   empty, `/`, or only contained `.` segments.
+fn normalize_path(path: &str) -> Option<String> {
+	let trimmed = path.trim_matches('/');
+	if trimmed.is_empty() || trimmed == "." {
+		return None;
+	}
+	let segments: Vec<&str> = trimmed
+		.split('/')
+		.filter(|s| !s.is_empty() && *s != ".")
+		.collect();
+	if segments.is_empty() {
+		None
+	} else {
+		Some(segments.join("/"))
+	}
+}
+
+/// Returns true if the path represents the root directory.
+fn is_root_path(path: Option<&str>) -> bool {
+	match path {
+		None | Some("") | Some("/") => true,
+		Some(s) => s.trim_matches('/').is_empty() || s.trim_matches('/') == ".",
+	}
+}
+
 /// Resolve a remote path to a file or directory item.
 ///
 /// Delegates to the SDK's HMAC-based path resolution. Returns the item if
 /// found, or an `ErrorData` describing the failure otherwise.
+///
+/// The path must already be normalized via [`normalize_path`].
 ///
 /// # Errors
 /// Returns an internal error if the path is not found or resolution fails.
@@ -992,13 +1141,53 @@ async fn resolve_path<'a>(
 		.ok_or_else(|| ErrorData::internal_error(format!("Path not found: {path}"), None))
 }
 
+/// Resolve a remote path to a directory (accepting root).
+///
+/// If the path is `None`, empty, or `/`, the root directory is returned.
+/// Otherwise the path is normalized and resolved via [`resolve_path`],
+/// accepting both `NonRootFileType::Dir` and `NonRootFileType::Root`.
+async fn resolve_dir_path<'a>(
+	client: &'a Client,
+	path: Option<&str>,
+) -> Result<DirType<'a, filen_sdk_rs::fs::categories::Normal>, ErrorData> {
+	if is_root_path(path) {
+		return Ok(DirType::Root(Cow::Borrowed(client.root())));
+	}
+	let raw = path.unwrap_or("/");
+	let normalized = normalize_path(raw)
+		.ok_or_else(|| ErrorData::internal_error(format!("Invalid path: {raw}"), None))?;
+	let item = resolve_path(client, &normalized).await?;
+	match item {
+		NonRootFileType::Dir(d) => Ok(DirType::Dir(d)),
+		NonRootFileType::Root(r) => Ok(DirType::Root(r)),
+		_ => Err(ErrorData::internal_error(
+			format!("Path is not a directory: {raw}"),
+			None,
+		)),
+	}
+}
+
 /// Split a path string into `(parent, name)` at the last `/`.
 ///
-/// Returns `None` if the path has no separator (i.e. is just a name).
-fn split_path(path: &str) -> Option<(&str, &str)> {
+/// Returns `Some((Some(parent), name))` if there is a parent directory,
+/// `Some((None, name))` if the item is at the root level.
+/// Returns `None` if the path has no name component.
+fn split_path_for_mkdir(path: &str) -> Option<(Option<&str>, &str)> {
 	let path = path.trim_matches('/');
-	let idx = path.rfind('/')?;
-	Some((&path[..idx], &path[idx + 1..]))
+	if path.is_empty() {
+		return None;
+	}
+	match path.rfind('/') {
+		Some(idx) => Some((Some(&path[..idx]), &path[idx + 1..])),
+		None => {
+			// No slash — the entire string is the name, parent is root
+			if path.is_empty() {
+				None
+			} else {
+				Some((None, path))
+			}
+		}
+	}
 }
 
 /// Format an optional `DateTime<Utc>` as an RFC 3339 string,
