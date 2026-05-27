@@ -753,7 +753,6 @@ dependencies = [
  "clap",
  "filen-sdk-rs",
  "filen-types",
- "futures",
  "futures-util",
  "rmcp",
  "rpassword",

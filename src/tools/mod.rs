@@ -1,6 +1,6 @@
 //! MCP tool implementations for Filen-MCP.
 //!
-//! All 17 tools that the MCP server exposes. Each tool delegates to the Filen
+//! All 22 tools that the MCP server exposes. Each tool delegates to the Filen
 //! SDK for the actual cloud storage operations. File data never travels through
 //! the JSON-RPC channel — only path strings do.
 
@@ -1018,16 +1018,16 @@ impl FilenMcpServer {
 		let guard = self.client().await?;
 		let client = guard.as_ref().unwrap();
 		let note_uuid = uuid::Uuid::parse_str(&uuid)
-			.map_err(|_| ErrorData::internal_error("Invalid UUID", None))?;
+			.map_err(|e| ErrorData::internal_error(format!("Invalid UUID: {e}"), None))?;
 		let mut note = client
 			.get_note(UuidStr::from(&note_uuid))
 			.await
-			.map_err(|_| ErrorData::internal_error("API Error", None))?
-			.ok_or_else(|| ErrorData::internal_error("Not Found", None))?;
+			.map_err(|e| ErrorData::internal_error(format!("Failed to get note: {e}"), None))?
+			.ok_or_else(|| ErrorData::internal_error(format!("Note not found: {uuid}"), None))?;
 		client
 			.archive_note(&mut note)
 			.await
-			.map_err(|_| ErrorData::internal_error("Archive failed", None))?;
+			.map_err(|e| ErrorData::internal_error(format!("Failed to archive note: {e}"), None))?;
 		Ok(Json(NoteCreateOutput {
 			uuid: note.uuid().to_string(),
 			title: note.title().unwrap_or("?").to_string(),
@@ -1042,16 +1042,16 @@ impl FilenMcpServer {
 		let guard = self.client().await?;
 		let client = guard.as_ref().unwrap();
 		let note_uuid = uuid::Uuid::parse_str(&uuid)
-			.map_err(|_| ErrorData::internal_error("Invalid UUID", None))?;
+			.map_err(|e| ErrorData::internal_error(format!("Invalid UUID: {e}"), None))?;
 		let mut note = client
 			.get_note(UuidStr::from(&note_uuid))
 			.await
-			.map_err(|_| ErrorData::internal_error("API Error", None))?
-			.ok_or_else(|| ErrorData::internal_error("Not Found", None))?;
+			.map_err(|e| ErrorData::internal_error(format!("Failed to get note: {e}"), None))?
+			.ok_or_else(|| ErrorData::internal_error(format!("Note not found: {uuid}"), None))?;
 		client
 			.trash_note(&mut note)
 			.await
-			.map_err(|_| ErrorData::internal_error("Trash failed", None))?;
+			.map_err(|e| ErrorData::internal_error(format!("Failed to trash note: {e}"), None))?;
 		Ok(Json(NoteCreateOutput {
 			uuid: note.uuid().to_string(),
 			title: note.title().unwrap_or("?").to_string(),
@@ -1069,16 +1069,16 @@ impl FilenMcpServer {
 		let guard = self.client().await?;
 		let client = guard.as_ref().unwrap();
 		let note_uuid = uuid::Uuid::parse_str(&uuid)
-			.map_err(|_| ErrorData::internal_error("Invalid UUID", None))?;
+			.map_err(|e| ErrorData::internal_error(format!("Invalid UUID: {e}"), None))?;
 		let mut note = client
 			.get_note(UuidStr::from(&note_uuid))
 			.await
-			.map_err(|_| ErrorData::internal_error("API Error", None))?
-			.ok_or_else(|| ErrorData::internal_error("Not Found", None))?;
+			.map_err(|e| ErrorData::internal_error(format!("Failed to get note: {e}"), None))?
+			.ok_or_else(|| ErrorData::internal_error(format!("Note not found: {uuid}"), None))?;
 		client
 			.restore_note(&mut note)
 			.await
-			.map_err(|_| ErrorData::internal_error("Restore failed", None))?;
+			.map_err(|e| ErrorData::internal_error(format!("Failed to restore note: {e}"), None))?;
 		Ok(Json(NoteCreateOutput {
 			uuid: note.uuid().to_string(),
 			title: note.title().unwrap_or("?").to_string(),
@@ -1181,14 +1181,7 @@ fn split_path_for_mkdir(path: &str) -> Option<(Option<&str>, &str)> {
 	}
 	match path.rfind('/') {
 		Some(idx) => Some((Some(&path[..idx]), &path[idx + 1..])),
-		None => {
-			// No slash — the entire string is the name, parent is root
-			if path.is_empty() {
-				None
-			} else {
-				Some((None, path))
-			}
-		}
+		None => Some((None, path)),
 	}
 }
 

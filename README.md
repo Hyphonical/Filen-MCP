@@ -1,6 +1,6 @@
 # Filen-MCP
 
-MCP server for [Filen](https://filen.io) cloud storage. Exposes 17 tools
+MCP server for [Filen](https://filen.io) cloud storage. Exposes 22 tools
 to LLM clients (Claude Desktop, Cursor, etc.) over the Model Context Protocol.
 
 ## Features
