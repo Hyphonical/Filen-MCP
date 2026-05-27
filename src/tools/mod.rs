@@ -450,8 +450,9 @@ impl FilenMcpServer {
 		let guard = self.client().await?;
 		let client = guard.as_ref().unwrap();
 
-		let normalized = normalize_path(&remote_path)
-			.ok_or_else(|| ErrorData::internal_error(format!("Path is not a file: {remote_path}"), None))?;
+		let normalized = normalize_path(&remote_path).ok_or_else(|| {
+			ErrorData::internal_error(format!("Path is not a file: {remote_path}"), None)
+		})?;
 		let item = resolve_path(client, &normalized).await?;
 
 		let file = match item {
@@ -536,8 +537,9 @@ impl FilenMcpServer {
 		let guard = self.client().await?;
 		let client = guard.as_ref().unwrap();
 
-		let src_normalized = normalize_path(&from)
-			.ok_or_else(|| ErrorData::internal_error(format!("Invalid source path: {from}"), None))?;
+		let src_normalized = normalize_path(&from).ok_or_else(|| {
+			ErrorData::internal_error(format!("Invalid source path: {from}"), None)
+		})?;
 		let dest_normalized = normalize_path(&to)
 			.ok_or_else(|| ErrorData::internal_error(format!("Invalid dest path: {to}"), None))?;
 
